@@ -8,7 +8,10 @@ import numpy as np
 import cv2
 from torch.utils.data import Dataset
 from PIL import Image
-
+import xml.etree.ElementTree as ET
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.patches import Rectangle
 def get_color_mapped_image(image, floor_distance=3000):
     """
         #TODO: why do we need floor distance?
@@ -59,6 +62,11 @@ def save_image(output_dir, image, tiff_image_path):
     output_file_path = os.path.join(output_dir, f"{base_name}.png")
     # Save the image
     image.save(output_file_path)
+
+
+
+
+
 class UnlabeledColorMappedDataset(Dataset):
 
     def __init__(self, img_dir, transform=None):
