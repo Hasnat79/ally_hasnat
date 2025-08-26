@@ -2,3 +2,12 @@ data
 *.pth
 __pychache__
 *.pyc
+
+*.jpg
+archive
+*.pt
+labels
+runs_obb
+outputs
+!assets/103L_5424_tiff.png
+!assets/103L_5424.png
