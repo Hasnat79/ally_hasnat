@@ -170,4 +170,27 @@ Both images represent the same sample, with the right image showing the color-ma
     --out_xml ../data/autolabels_xml 
  ```
 ---
+## 6. Crop Images from XML Label Files (for further training purpose)
+- Run [src/crop_images_from_bbox_labels.py](./src/crop_images_from_bbox_labels.py) to extract cropped images from predicted bounding boxes.
 
+<div align="center">
+
+<table>
+    <tr>
+        <th>Cropped Image Preview</th>
+    </tr>
+    <tr>
+        <td><img src="./assets/103L_5424_crop_1.png" alt="103L_5424_crop_1.png" width="300"/></td>
+    </tr>
+</table>
+
+</div>
+
+```bash
+cd src
+python crop_images_from_bbox_labels.py \
+--img_dir {path_to_png_image_dir}\
+--lable_dir {path_to_XML_label_files_dir} \
+--output_dir {path_to_save_cropped_img_dir}
+
+```
