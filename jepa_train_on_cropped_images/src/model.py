@@ -181,3 +181,100 @@ class JEPAEncoder(nn.Module):
         x4 = self.layer4(x3)       # [B,512,H/32,W/32]
         x4_proj = self.proj_head(x4)  # [B,proj_dim,H/32,W/32]
         return x4_proj, [x3, x2, x1, x0]  # skip features list
+
+class JEPAUnetDecoder(nn.Module):
+    def __init__(self, proj_dim=256, encoder_channels=[256,128,64,64], out_classes=1):
+        super().__init__()
+
+        # up from proj_dim (256) + skip 256
+        self.upconv4 = nn.ConvTranspose2d(proj_dim, 256, kernel_size=2, stride=2)
+        self.conv4 = nn.Sequential(
+            nn.Conv2d(proj_dim + encoder_channels[0], 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True)
+        )
+
+        self.upconv3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(256, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True)
+        )
+
+        self.upconv2 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+
+        self.upconv1 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True)
+        )
+
+        self.final_conv = nn.Conv2d(64, out_classes, kernel_size=1)
+
+    def forward(self, x, skips, original_size):
+        # x: x4_proj
+        # skips: [x3, x2, x1, x0]
+        # First block
+        x = self.upconv4(x)
+        x = torch.cat([x, skips[0]], dim=1)
+        x = self.conv4(x)
+
+        # Second block
+        x = self.upconv3(x)
+        x = torch.cat([x, skips[1]], dim=1)
+        x = self.conv3(x)
+
+        # Third block
+        x = self.upconv2(x)
+        x = torch.cat([x, skips[2]], dim=1)
+        x = self.conv2(x)
+
+        # Fourth block
+        x = self.upconv1(x)
+        x = torch.cat([x, skips[3]], dim=1)
+        x = self.conv1(x)
+
+        x = self.final_conv(x)
+        x = nn.functional.interpolate(x, size=original_size, mode='bilinear', align_corners=False)
+        return x
+
+class JEPAUnet(nn.Module):
+    def __init__(self, jepa_weights_path, proj_dim=256, out_classes=1, imgformat='rgb'):
+        super().__init__()
+        # Build encoder and load trained weights
+        self.encoder = JEPAEncoder(proj_dim=proj_dim, imgformat=imgformat)
+        state = torch.load(jepa_weights_path, map_location='cpu')
+        self.encoder.load_state_dict(state, strict=False)
+        print("JEPA encoder weights loaded .")
+
+        # Freeze encoder
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        print("JEPA encoder frozen.")
+
+        # Build decoder
+        self.decoder = JEPAUnetDecoder(proj_dim=proj_dim, out_classes=out_classes)
+
+    def forward(self, x):
+        original_size = (x.shape[2], x.shape[3])
+        x4_proj, skips = self.encoder(x)   # get deepest + skip features
+        seg = self.decoder(x4_proj, skips, original_size)
+        return seg

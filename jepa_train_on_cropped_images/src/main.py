@@ -7,16 +7,19 @@ import os
 import time
 from torchvision import transforms
 from torch.utils.data import DataLoader
-
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 from utils import get_device_configuration
-from data import LoadCroppedUnlabeledDataset
-from train import JEPA_train
+from data import LoadCroppedUnlabeledDataset, LoadLabeledDataset
+from train import JEPA_train, SEGTrain
+
+
 
 def main():
     parser = argparse.ArgumentParser(description= 'JEPA-based Segmentation for Cattle Depth Color-mapped + Cropped Images')
 
-    parser.add_argument('--mode', type=str, choices=['train_jepa'], help= 'Mode: train_jepa')
+    parser.add_argument('--mode', type=str, choices=['train_jepa','train_unet'], help= 'Mode: train_jepa')
     parser.add_argument('--image_dir', type=str, default='../data/unlabeled_color_mapped_cropped_imgs', help='Directory with cropped color-mapped unlabeled images')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=100, help='Epochs for JEPA encoder and UNet decoder training')
@@ -70,8 +73,77 @@ def main():
         elapsed_time = time.time() - start_time
         print(f"Computational to train JEPA: {elapsed_time:.2f}s") 
 
+    if args.mode == 'train_unet':
+        image_dir = args.image_dir
+        if not os.path.isdir(image_dir):
+            raise FileNotFoundError(f"Directory '{image_dir}' not found.")
+        
+        # jepa encoder (trained) weights path
+        jepa_weights_path = os.path.join(WEIGHT_DIR, JEPA_MODEL_NAME)
+
+        print("Training UNet-Like decoder on labeled images ...")
+
+        start_time = time.time()
+
+        # Set the image transformation for training labeled images while loading
+        # Set the image transformation for training leabeled images while loading
+        train_transform = A.Compose([
+            A.Resize(224, 224),             # Resize image and mask
+            A.HorizontalFlip(p=0.5),        # Random horizontal flip
+            A.VerticalFlip(p=0.5),          # Random vertical flip
+            A.Rotate(limit=30, p=0.5),      # Random rotation
+            A.RandomBrightnessContrast(p=0.3),  # optional color jitter
+            ToTensorV2()                    # Convert both to tensors
+            ])
+        
+        # Set the image transformation for valiation Leabeled images while loading
+        valid_transform = A.Compose([
+            A.Resize(224, 224),  # Resize to 224x224
+            ToTensorV2()  # Convert to PyTorch tensor
+        ])
+
+        train_image_dir = os.path.join(image_dir, 'train/image')
+        train_mask_dir = os.path.join(image_dir, 'train/mask')
+        valid_image_dir = os.path.join(image_dir, 'valid/image')
+        valid_mask_dir = os.path.join(image_dir, 'valid/mask')
+
+        # Create dataset: input -> tiff image , output --> color mapped (depth colormap) image
+        train_dataset = LoadLabeledDataset(
+            train_image_dir, 
+            train_mask_dir,
+            'train',
+            transform=train_transform
+            )
+        valid_dataset = LoadLabeledDataset(
+            valid_image_dir,
+            valid_mask_dir,
+            'train',
+            transform=valid_transform
+        )
+
+        # create dataloaders
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=12)
+        valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=12)
 
 
+        # Train UNet decoder like on labeled data
+        SEGTrain(
+            train_loader,
+            valid_loader,
+            DEVICE,
+            jepa_weights_path,
+            WEIGHT_DIR,
+            JEPA_UNET_MODEL_NAME,
+            proj_dim=256,
+            out_classes=1,
+            img_format='rgb',
+            lr=1e-3,
+            epochs=args.epochs,
+            patience=8
+        )
+        # Calculate elapsed time for training UNet decoder
+        elapsed_time = time.time() - start_time
+        print(f"\nComputational time for fine tunning: {elapsed_time:.2f}s") 
 
 
 if __name__ == "__main__":
