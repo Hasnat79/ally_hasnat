@@ -10,16 +10,17 @@ from torch.utils.data import DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from utils import get_device_configuration
+from inference import testing,inference
+from utils import get_device_configuration, summarize_results
 from data import LoadCroppedUnlabeledDataset, LoadLabeledDataset
 from train import JEPA_train, SEGTrain
-
+import pandas as pd
 
 
 def main():
     parser = argparse.ArgumentParser(description= 'JEPA-based Segmentation for Cattle Depth Color-mapped + Cropped Images')
 
-    parser.add_argument('--mode', type=str, choices=['train_jepa','train_unet'], help= 'Mode: train_jepa')
+    parser.add_argument('--mode', type=str, choices=['train_jepa','train_unet','inference'], help= 'Mode: train_jepa')
     parser.add_argument('--image_dir', type=str, default='../data/unlabeled_color_mapped_cropped_imgs', help='Directory with cropped color-mapped unlabeled images')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size')
     parser.add_argument('--epochs', type=int, default=100, help='Epochs for JEPA encoder and UNet decoder training')
@@ -145,6 +146,42 @@ def main():
         elapsed_time = time.time() - start_time
         print(f"\nComputational time for fine tunning: {elapsed_time:.2f}s") 
 
+    if args.mode == 'inference':
 
+        print("Inference JEPAUNet ...")
+        start_time = time.time()
+
+        # Encoder + Decoder weights path
+        jepa_unet_weights_path = os.path.join(WEIGHT_DIR, JEPA_UNET_MODEL_NAME)
+
+        # Image transformatipon
+        transform = A.Compose([
+            A.Resize(224, 224),
+            ToTensorV2()
+        ])
+
+        if args.stats:
+
+            #Set Directions
+            image_dir = os.path.join(args.image_dir, 'test/image')
+            mask_dir = os.path.join(args.image_dir, 'test/mask')
+
+            if not os.path.isdir(image_dir):
+                raise FileNotFoundError(f"Directory '{image_dir}' not found.")
+            if not os.path.isdir(mask_dir):
+                raise FileNotFoundError(f"Directory '{mask_dir}' not found.")
+
+            seg_dir = os.path.join(args.image_dir, 'segmentation')
+            os.makedirs(seg_dir, exist_ok=True)
+            
+            # Create datasets with the custom mapping and load it
+            dataset = LoadLabeledDataset (image_dir, mask_dir, 'test', transform=transform)
+            dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=12)
+
+            results = testing(jepa_unet_weights_path,dataloader,DEVICE, seg_dir)
+            pd.DataFrame(results).to_csv(os.path.join(os.getcwd(), 'results.csv'), index=False)
+            print(f"Results saved to {os.path.join(os.getcwd(), 'results.csv')}")
+
+            summarize_results(results)
 if __name__ == "__main__":
     main()
